@@ -1,0 +1,373 @@
+const CONFIG = {
+    ETHEREUM: {
+        WALLET_ADDRESS: "0xYourActualEthereumMainnetAddress", // ← YOUR REAL ETH ADDRESS
+        PROVIDER_URL: "https://mainnet.infura.io/v3/your-real-infura-key" // ← REAL INFURA
+    },
+    BITCOIN: {
+        WALLET_ADDRESS: "1YourActualBitcoinMainnetAddress" // ← YOUR REAL BTC ADDRESS
+    }
+};const { ethers } = require('ethers');
+const bitcoin = require('bitcoinjs-lib');
+const { ECPairFactory } = require('ecpair');
+const tinysecp = require('tiny-secp256k1');
+
+const ECPair = ECPairFactory(tinysecp);
+
+// ==================== MAINNET CONFIGURATION ====================
+const CONFIG = {
+    // ETHEREUM MAINNET SETTINGS
+    ETHEREUM: {
+        WALLET_ADDRESS: "", // <--- ADD YOUR MAINNET ETH WALLET ADDRESS HERE
+        PROVIDER_URL: "https://mainnet.infura.io/v3/YOUR_INFURA_PROJECT_ID", // MAINNET
+        CHAIN_ID: 1, // Ethereum Mainnet
+        GAS_LIMIT: 21000,
+        GAS_PRICE: "30000000000", // 30 Gwei
+        EXPLORER: "https://etherscan.io/tx/"
+    },
+    
+    // BITCOIN MAINNET SETTINGS  
+    BITCOIN: {
+        WALLET_ADDRESS: "", // <--- ADD YOUR MAINNET BTC WALLET ADDRESS HERE
+        NETWORK: bitcoin.networks.bitcoin, // BITCOIN MAINNET
+        API_URL: "https://blockstream.info/api/",
+        EXPLORER: "https://blockstream.info/tx/"
+    }
+};
+
+// ==================== REAL MAINNET WALLET ====================
+class MainnetBlockchainWallet {
+    constructor() {
+        // Ethereum Mainnet Provider
+        this.ethProvider = new ethers.providers.JsonRpcProvider(CONFIG.ETHEREUM.PROVIDER_URL);
+        
+        // Wallet instances
+        this.wallets = {
+            ethereum: null,
+            bitcoin: null
+        };
+        
+        console.log("🌐 CONNECTED TO MAINNET NETWORKS");
+    }
+
+    // ==================== REAL MAINNET BALANCE CHECKING ====================
+    async getRealBalances() {
+        console.log("🔍 CHECKING MAINNET BALANCES...");
+        const balances = { ethereum: null, bitcoin: null };
+
+        try {
+            // Get Real Ethereum Mainnet Balance
+            if (CONFIG.ETHEREUM.WALLET_ADDRESS) {
+                console.log("📡 Fetching ETH balance from Ethereum Mainnet...");
+                const ethBalance = await this.ethProvider.getBalance(CONFIG.ETHEREUM.WALLET_ADDRESS);
+                balances.ethereum = {
+                    balance: ethers.utils.formatEther(ethBalance),
+                    raw: ethBalance,
+                    currency: "ETH",
+                    address: CONFIG.ETHEREUM.WALLET_ADDRESS,
+                    network: "Ethereum Mainnet"
+                };
+                console.log("✅ Ethereum Mainnet Balance Retrieved");
+            } else {
+                console.log("❌ Ethereum: Add wallet address to CONFIG.ETHEREUM.WALLET_ADDRESS");
+            }
+
+            // Get Real Bitcoin Mainnet Balance
+            if (CONFIG.BITCOIN.WALLET_ADDRESS) {
+                console.log("📡 Fetching BTC balance from Bitcoin Mainnet...");
+                balances.bitcoin = await this.getBitcoinBalance(CONFIG.BITCOIN.WALLET_ADDRESS);
+                console.log("✅ Bitcoin Mainnet Balance Retrieved");
+            } else {
+                console.log("❌ Bitcoin: Add wallet address to CONFIG.BITCOIN.WALLET_ADDRESS");
+            }
+
+            return balances;
+        } catch (error) {
+            console.error("❌ Mainnet balance check failed:", error.message);
+            return balances;
+        }
+    }
+
+    async getBitcoinBalance(address) {
+        try {
+            const response = await fetch(`${CONFIG.BITCOIN.API_URL}address/${address}`);
+            const data = await response.json();
+            
+            const balanceBTC = (data.chain_stats.funded_txo_sum - data.chain_stats.spent_txo_sum) / 100000000;
+            
+            return {
+                balance: balanceBTC,
+                confirmed: data.chain_stats.funded_txo_sum - data.chain_stats.spent_txo_sum,
+                pending: data.mempool_stats.funded_txo_sum - data.mempool_stats.spent_txo_sum,
+                currency: "BTC",
+                address: address,
+                network: "Bitcoin Mainnet",
+                transaction_count: data.chain_stats.tx_count
+            };
+        } catch (error) {
+            console.error("❌ Bitcoin mainnet balance check failed:", error.message);
+            return null;
+        }
+    }
+
+    // ==================== REAL MAINNET TRANSACTIONS ====================
+    async sendEthereum(toAddress, amountETH, privateKey) {
+        try {
+            console.log("🚀 INITIATING ETHEREUM MAINNET TRANSACTION...");
+            
+            const wallet = new ethers.Wallet(privateKey, this.ethProvider);
+            
+            // Get current gas price from network
+            const currentGasPrice = await this.ethProvider.getGasPrice();
+            const increasedGasPrice = currentGasPrice.add(ethers.utils.parseUnits("10", "gwei")); // Add 10 Gwei for faster confirmation
+
+            // Transaction object for mainnet
+            const tx = {
+                to: toAddress,
+                value: ethers.utils.parseEther(amountETH.toString()),
+                gasLimit: CONFIG.ETHEREUM.GAS_LIMIT,
+                gasPrice: increasedGasPrice,
+                chainId: CONFIG.ETHEREUM.CHAIN_ID
+            };
+
+            // Estimate gas (safety check)
+            const estimatedGas = await wallet.estimateGas(tx);
+            console.log(`⛽ Estimated Gas: ${estimatedGas.toString()}`);
+
+            // Send transaction
+            console.log("📤 Broadcasting to Ethereum Mainnet...");
+            const transaction = await wallet.sendTransaction(tx);
+            console.log("✅ Ethereum Mainnet Transaction Sent!");
+            console.log(`🔗 Transaction Hash: ${transaction.hash}`);
+            console.log(`🌐 Explorer: ${CONFIG.ETHEREUM.EXPLORER}${transaction.hash}`);
+
+            // Wait for confirmation
+            console.log("⏳ Waiting for confirmation...");
+            const receipt = await transaction.wait();
+            console.log("✅ Ethereum Transaction Confirmed!");
+            console.log(`📦 Block: ${receipt.blockNumber}`);
+            console.log(`🎯 Confirmations: ${receipt.confirmations}`);
+
+            return {
+                success: true,
+                hash: transaction.hash,
+                block: receipt.blockNumber,
+                confirmations: receipt.confirmations,
+                from: wallet.address,
+                to: toAddress,
+                amount: amountETH,
+                explorer: `${CONFIG.ETHEREUM.EXPLORER}${transaction.hash}`
+            };
+        } catch (error) {
+            console.error("❌ Ethereum mainnet transaction failed:", error.message);
+            return { success: false, error: error.message };
+        }
+    }
+
+    async sendBitcoin(toAddress, amountBTC, privateKey) {
+        try {
+            console.log("🚀 INITIATING BITCOIN MAINNET TRANSACTION...");
+            
+            // For Bitcoin mainnet, we need to:
+            // 1. Get UTXOs for the wallet
+            // 2. Create transaction
+            // 3. Sign and broadcast
+            
+            const keyPair = ECPair.fromPrivateKey(Buffer.from(privateKey, 'hex'), { 
+                network: CONFIG.BITCOIN.NETWORK 
+            });
+
+            // Get UTXOs (Unspent Transaction Outputs)
+            const utxos = await this.getUTXOs(CONFIG.BITCOIN.WALLET_ADDRESS);
+            
+            if (utxos.length === 0) {
+                throw new Error("No UTXOs available for transaction");
+            }
+
+            // Simplified Bitcoin transaction structure
+            // Note: Full Bitcoin transaction requires proper UTXO selection and change address
+            const psbt = new bitcoin.Psbt({ network: CONFIG.BITCOIN.NETWORK });
+            
+            // Add inputs (UTXOs)
+            // Add outputs (recipient and change)
+            // Sign
+            // Extract and broadcast transaction
+
+            console.log("📋 Bitcoin Mainnet Transaction Details:");
+            console.log("   From:", CONFIG.BITCOIN.WALLET_ADDRESS);
+            console.log("   To:", toAddress);
+            console.log("   Amount:", amountBTC, "BTC");
+            console.log("   Network: Bitcoin Mainnet");
+            console.log("   UTXOs Available:", utxos.length);
+            
+            return {
+                success: true,
+                message: "Bitcoin mainnet transaction prepared - implement UTXO management for full broadcast",
+                from: CONFIG.BITCOIN.WALLET_ADDRESS,
+                to: toAddress,
+                amount: amountBTC,
+                network: "Bitcoin Mainnet",
+                utxos: utxos.length
+            };
+        } catch (error) {
+            console.error("❌ Bitcoin mainnet transaction failed:", error.message);
+            return { success: false, error: error.message };
+        }
+    }
+
+    async getUTXOs(address) {
+        try {
+            const response = await fetch(`${CONFIG.BITCOIN.API_URL}address/${address}/utxo`);
+            const utxos = await response.json();
+            return utxos;
+        } catch (error) {
+            console.error("❌ Failed to fetch UTXOs:", error.message);
+            return [];
+        }
+    }
+
+    // ==================== WALLET INFO & MONITORING ====================
+    async getWalletInfo() {
+        const info = {
+            ethereum: {},
+            bitcoin: {}
+        };
+
+        // Ethereum wallet info
+        if (CONFIG.ETHEREUM.WALLET_ADDRESS) {
+            const balance = await this.ethProvider.getBalance(CONFIG.ETHEREUM.WALLET_ADDRESS);
+            const network = await this.ethProvider.getNetwork();
+            
+            info.ethereum = {
+                address: CONFIG.ETHEREUM.WALLET_ADDRESS,
+                balance: ethers.utils.formatEther(balance),
+                network: "Ethereum Mainnet",
+                chainId: network.chainId,
+                blockNumber: await this.ethProvider.getBlockNumber()
+            };
+        }
+
+        // Bitcoin wallet info
+        if (CONFIG.BITCOIN.WALLET_ADDRESS) {
+            const btcBalance = await this.getBitcoinBalance(CONFIG.BITCOIN.WALLET_ADDRESS);
+            info.bitcoin = {
+                address: CONFIG.BITCOIN.WALLET_ADDRESS,
+                balance: btcBalance?.balance || 0,
+                network: "Bitcoin Mainnet",
+                transaction_count: btcBalance?.transaction_count || 0
+            };
+        }
+
+        return info;
+    }
+
+    displayWalletInfo(info) {
+        console.log("\n" + "=".repeat(60));
+        console.log("💰 MAINNET WALLET INFORMATION");
+        console.log("=".repeat(60));
+        
+        if (info.ethereum.address) {
+            console.log("\n🔷 ETHEREUM MAINNET:");
+            console.log("   Address:", info.ethereum.address);
+            console.log("   Balance:", info.ethereum.balance, "ETH");
+            console.log("   Network:", info.ethereum.network);
+            console.log("   Chain ID:", info.ethereum.chainId);
+            console.log("   Current Block:", info.ethereum.blockNumber);
+        }
+        
+        if (info.bitcoin.address) {
+            console.log("\n🟠 BITCOIN MAINNET:");
+            console.log("   Address:", info.bitcoin.address);
+            console.log("   Balance:", info.bitcoin.balance, "BTC");
+            console.log("   Network:", info.bitcoin.network);
+            console.log("   Transactions:", info.bitcoin.transaction_count);
+        }
+        
+        if (!info.ethereum.address && !info.bitcoin.address) {
+            console.log("\n❌ No wallet addresses configured.");
+            console.log("   Add your addresses to CONFIG.ETHEREUM.WALLET_ADDRESS and CONFIG.BITCOIN.WALLET_ADDRESS");
+        }
+    }
+
+    startMainnetMonitoring(intervalMs = 60000) {
+        console.log("🔍 Starting MAINNET real-time monitoring...");
+        
+        return setInterval(async () => {
+            const balances = await this.getRealBalances();
+            this.displayRealTimeBalances(balances);
+        }, intervalMs);
+    }
+
+    displayRealTimeBalances(balances) {
+        console.log("\n🕒 MAINNET BALANCES -", new Date().toLocaleTimeString());
+        console.log("-".repeat(50));
+        
+        if (balances.ethereum) {
+            console.log(`💰 ETH: ${balances.ethereum.balance} ETH (Mainnet)`);
+        }
+        
+        if (balances.bitcoin) {
+            console.log(`💰 BTC: ${balances.bitcoin.balance} BTC (Mainnet)`);
+        }
+        
+        console.log("-".repeat(50));
+    }
+}
+
+// ==================== MAIN EXECUTION ====================
+async function main() {
+    console.log("🚀 REAL MAINNET BLOCKCHAIN WALLET");
+    console.log("==================================\n");
+
+    const wallet = new MainnetBlockchainWallet();
+
+    // Display configuration status
+    console.log("📋 MAINNET CONFIGURATION STATUS:");
+    console.log("Ethereum Mainnet:", CONFIG.ETHEREUM.WALLET_ADDRESS || "❌ NOT CONFIGURED");
+    console.log("Bitcoin Mainnet:", CONFIG.BITCOIN.WALLET_ADDRESS || "❌ NOT CONFIGURED");
+    console.log("");
+
+    // Get wallet information
+    const walletInfo = await wallet.getWalletInfo();
+    wallet.displayWalletInfo(walletInfo);
+
+    // Start mainnet monitoring
+    const monitorInterval = wallet.startMainnetMonitoring(60000); // Check every minute
+
+    // Example of how to send transactions (commented out for safety)
+    console.log("\n💡 TRANSACTION EXAMPLES (commented out for safety):");
+    console.log("// Ethereum Mainnet:");
+    console.log('// await wallet.sendEthereum("0xRecipientAddress", 0.01, "your_private_key");');
+    console.log("// Bitcoin Mainnet:");
+    console.log('// await wallet.sendBitcoin("1BitcoinRecipient", 0.001, "your_private_key");');
+
+    // Graceful shutdown
+    process.on('SIGINT', () => {
+        console.log("\n🛑 Stopping mainnet monitor...");
+        clearInterval(monitorInterval);
+        process.exit(0);
+    });
+}
+
+// ==================== QUICK MAINNET FUNCTIONS ====================
+async function quickSendETH(toAddress, amount, privateKey) {
+    const wallet = new MainnetBlockchainWallet();
+    return await wallet.sendEthereum(toAddress, amount, privateKey);
+}
+
+async function quickCheckBalances() {
+    const wallet = new MainnetBlockchainWallet();
+    return await wallet.getRealBalances();
+}
+
+// Export for use in other files
+module.exports = {
+    MainnetBlockchainWallet,
+    quickSendETH,
+    quickCheckBalances,
+    CONFIG
+};
+
+// Run if this file is executed directly
+if (require.main === module) {
+    main().catch(console.error);
+}npm install ethers bitcoinjs-lib ecpair tiny-secp256k1 node-fetchhttps://mainnet.infura.io/v3/your-real-infura-key
